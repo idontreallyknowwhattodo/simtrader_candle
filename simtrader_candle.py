@@ -31,7 +31,48 @@ import time
 import random
 from datetime import datetime
 
-DB_PATH = 'simtrader.db'
+import os
+import traceback
+
+# ---------- robust DB path ----------
+DEFAULT_DB = 'simtrader.db'
+
+# prefer current working dir if writable, else fallback to /tmp
+try:
+    cwd = os.getcwd()
+    testpath = os.path.join(cwd, 'db_write_test.tmp')
+    with open(testpath, 'w') as f:
+        f.write('ok')
+    os.remove(testpath)
+    DB_PATH = os.path.join(cwd, DEFAULT_DB)
+except Exception:
+    DB_PATH = os.path.join('/tmp', DEFAULT_DB)
+
+print('Using DB path:', DB_PATH)
+
+# ---------- ensure DB is initialized on import/startup ----------
+# call init_db() inside the app context now so tables exist under Gunicorn
+# NOTE: init_db() uses get_db() which relies on DB_PATH — ensure this block is placed
+# before any code that calls get_db() / queries the DB (for example, before route defs).
+try:
+    with app.app_context():
+        init_db()
+        print('Database initialized or already exists.')
+except Exception:
+    print('Error initializing DB:')
+    traceback.print_exc()
+    # re-raise so startup failure appears in logs (you can comment out raise if you prefer)
+    raise
+
+# ---------- start market simulator ----------
+# IMPORTANT: set --workers 1 on gunicorn so only one simulator thread runs
+try:
+    threading.Timer(1.0, market_tick).start()
+    print('Market simulator thread started.')
+except Exception:
+    print('Error starting market simulator thread:')
+    traceback.print_exc()
+
 MARKET_UPDATE_INTERVAL = 5.0  # seconds between price ticks
 CANDLE_BUCKET = 60.0  # seconds per candlestick
 PRICE_HISTORY_LENGTH = 500  # number of price points to keep
